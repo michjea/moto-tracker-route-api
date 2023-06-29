@@ -4,6 +4,7 @@ use osmpbfreader::objects::{Node, Way, NodeId, WayId};
 use std::fs::File;
 use std::io::BufReader;
 use crate::osm_graph::OSMGraph;
+use crate::osm_graph::Edge;
 //use crate::graph::Graph;
 //use crate::graph::Node;
 //use crate::graph::Way;
@@ -110,6 +111,10 @@ impl OSMReader {
 
         let start_time = std::time::Instant::now();
 
+        let mut link_counter: HashMap<NodeId, i64> = HashMap::new();
+        
+        let mut ways: Vec<Way> = Vec::new();
+
         for (id, obj) in &objs {
             // si c'est un node
             if obj.is_node() {
@@ -121,14 +126,131 @@ impl OSMReader {
             if obj.is_way() {
                 // add way with graph.add_way(way)
                 let way = obj.way().unwrap();
+
+                // for each node in way, add node to nodes_count, or increment it
+                for node in &way.nodes {
+                    let count = link_counter.get(&node).unwrap_or(&0) + 1;
+                    link_counter.insert(*node, count);
+                }
+
                 osm_graph.add_way(way);
+                ways.push(way.clone());
             }
         }
+
+        // parse all ways a second time; a way will normally become one edge, but if any nodes apart from the first and the last have a link counter greater than one, then split the way into two edges at that point.
+        
+        // for each way in graph
+        for way in &ways {
+            // for each node in way
+
+            let mut source = NodeId(0);
+
+            // check if way is one way or two way
+            let one_way = way.tags.contains_key("oneway") && way.tags["oneway"] == "yes";
+
+            for node in &way.nodes {
+                // si c'est le premier
+                if node == &way.nodes[0] {
+                    source = *node;
+                }
+                // if node is not first or last node in way
+                if node != &way.nodes[0] && node != &way.nodes[way.nodes.len() - 1] {
+                    // if node has a link counter greater than one
+                    if link_counter[node] > 1 {
+                        // split way into two edges at that point
+                        //println!("Split way into two edges at that point");
+                        //println!("Way: {:?}", way);
+                        //println!("Node: {:?}", node);
+                        //println!("Link counter: {:?}", link_counter[node]);
+                        //println!("Way nodes: {:?}", way.nodes);
+                        //println!("Way nodes len: {:?}", way.nodes.len());
+
+                        // get index of node in way
+                        let index = way.nodes.iter().position(|x| *x == *node).unwrap();
+
+                        //println!("Index: {:?}", index);
+
+                        // create two new ways
+                        let mut way1 = way.clone();
+                        //let mut way2 = way.clone();
+
+                        //println!("Way1: {:?}", way1);
+                        //println!("Way2: {:?}", way2);
+
+                        // set way1 nodes
+                        let source_index = way.nodes.iter().position(|x| *x == source).unwrap();
+                        way1.nodes = way.nodes[source_index..index + 1].to_vec();
+
+                        let mut distance = way1.nodes.len() as f64;
+
+                        /*for i in 0..way1.nodes.len() - 1 {
+                            let node1 = osm_graph.get_node(way1.nodes[i]).unwrap();
+                            let node2 = osm_graph.get_node(way1.nodes[i + 1]).unwrap();
+                            distance += OSMGraph::haversine_distance(node1.lat() as f64 / 10_000_000.0, node1.lon() as f64 / 10_000_000.0, node2.lat() as f64 / 10_000_000.0, node2.lon() as f64 / 10_000_000.0);
+                        }*/
+
+                        //println!("Distance: {:?}", distance);
+
+                        //println!("Way1: {:?}", way1);
+
+                        // set way2 nodes
+                        //way2.nodes = way.nodes[index..way.nodes.len()].to_vec();
+
+                        // add way1 and way2 to graph
+                        //osm_graph.add_way(way1);
+                        //osm_graph.add_way(way2);
+                        // from: i64, to: i64, distance: f64, weight, nodes_ids: Vec<i64>
+                        //println!("Distance: {:?}", distance);
+
+                        if (distance < 1.0)
+                        {
+                            //println!("Distance: {:?}", distance);
+                        }
+
+                        osm_graph.add_edge(Edge::new(source, *node, distance, distance, way1.nodes.clone()));
+
+
+                        let nodes = way1.nodes.clone().into_iter().rev().collect::<Vec<NodeId>>();
+
+                        if(!one_way) {
+                            osm_graph.add_edge(Edge::new(*node, source, distance, distance, nodes));
+                        }
+
+                        source = *node;
+                    }
+                }
+                // si c'est le dernier, on ajoute un edge
+                if node == &way.nodes[way.nodes.len() - 1] {
+                    // add edge with graph.add_edge(edge)
+                    // from: i64, to: i64, distance: f64, weight, nodes_ids: Vec<i64>
+                    let source_index = way.nodes.iter().position(|x| *x == source).unwrap();
+
+                    let mut distance = way.nodes.len() as f64;
+
+                    /*for i in 0..way.nodes.len() - 1 {
+                        let node1 = osm_graph.get_node(way.nodes[i]).unwrap();
+                        let node2 = osm_graph.get_node(way.nodes[i + 1]).unwrap();
+                        distance += OSMGraph::haversine_distance(node1.lat() as f64 / 10_000_000.0, node1.lon() as f64 / 10_000_000.0, node2.lat() as f64 / 10_000_000.0, node2.lon() as f64 / 10_000_000.0);
+                    }*/
+
+                    osm_graph.add_edge(Edge::new(source, *node, distance, distance, way.nodes[source_index..way.nodes.len()].to_vec()));
+
+                    let nodes = way.nodes.clone().into_iter().rev().collect::<Vec<NodeId>>();
+
+                    if(!one_way) {
+                        osm_graph.add_edge(Edge::new(*node, source, distance, distance, nodes));
+                    }
+                }
+            }
+        }
+
 
         println!("Build graph in {} seconds", start_time.elapsed().as_secs());
 
         println!("Nodes count: {}", osm_graph.get_node_count());
         println!("Ways count: {}", osm_graph.get_way_count());
+        println!("Edges count: {}", osm_graph.get_edge_count());
 
 
         /*

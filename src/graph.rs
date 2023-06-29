@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
+#[derive(Debug, Clone)]
 pub struct Graph {
     pub nodes: HashMap<i64, Node>,
     ways: HashMap<i64, Way>,
     pub edges: Vec<Edge>,
     //relations: HashMap<i64, Relation>,
-
 }
 
 impl Graph {
@@ -100,11 +100,17 @@ impl Graph {
     }
 
     pub fn get_edges_from_node(&self, node_id: i64) -> Vec<&Edge> {
-        self.edges.iter().filter(|edge| edge.from == node_id).collect()
+        self.edges
+            .iter()
+            .filter(|edge| edge.from == node_id)
+            .collect()
     }
 
     pub fn get_edges_to_node(&self, node_id: i64) -> Vec<&Edge> {
-        self.edges.iter().filter(|edge| edge.to == node_id).collect()
+        self.edges
+            .iter()
+            .filter(|edge| edge.to == node_id)
+            .collect()
     }
 
     pub fn reconstruct_path(&self, prev_nodes: &HashMap<i64, i64>, node_id: i64) -> Vec<i64> {
@@ -130,16 +136,22 @@ impl Graph {
 #[derive(Debug, Default)]
 pub struct Edge {
     pub from: i64, // Source
-    pub to: i64, // Target
+    pub to: i64,   // Target
     way_id: i64,
     pub distance: f64,
     pub weight: f64,
     pub nodes_ids: Vec<i64>,
 }
 
-
 impl Edge {
-    pub fn new(from: i64, to: i64, way_id: i64, distance: f64, weight: f64, nodes_ids: Vec<i64>) -> Self {
+    pub fn new(
+        from: i64,
+        to: i64,
+        way_id: i64,
+        distance: f64,
+        weight: f64,
+        nodes_ids: Vec<i64>,
+    ) -> Self {
         Edge {
             from,
             to,
@@ -191,7 +203,6 @@ impl Node {
     }
 }
 
-
 #[derive(Debug, Default, Clone)]
 pub struct Way {
     id: i64,
@@ -217,7 +228,6 @@ impl Way {
     }
 }
 
-
 #[derive(Debug)]
 pub struct Relation {
     id: i64,
@@ -240,9 +250,7 @@ pub struct State {
 
 impl State {
     pub fn new(node_id: i64, distance: f64) -> Self {
-        State {
-            node_id, distance
-        }
+        State { node_id, distance }
     }
 }
 
