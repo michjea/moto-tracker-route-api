@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
-#[derive(Debug, Clone)]
 pub struct Graph {
     pub nodes: HashMap<i64, Node>,
     ways: HashMap<i64, Way>,

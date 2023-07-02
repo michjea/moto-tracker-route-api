@@ -11,7 +11,8 @@ use osmpbfreader::objects::{Node, NodeId, Tags, Way, WayId};
 use route_calculation::dijkstra;
 use std::env;
 
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, post, web, web::ServiceConfig, App, HttpResponse, HttpServer, Responder};
+use shuttle_actix_web::ShuttleActixWeb;
 
 fn start() {
     let current_dir = env::current_dir().expect("Failed to get current directory");
@@ -161,8 +162,40 @@ async fn calculate_route(
     HttpResponse::Ok().json(result)
 }
 
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
+#[shuttle_runtime::main]
+async fn actix_web() -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
+    // change to main to start server
+
+    let current_dir = env::current_dir().expect("Failed to get current directory");
+    let file_path = current_dir.join("data").join("switzerland-latest.osm.pbf");
+    //let file_path = current_dir.join("data").join("luxembourg-latest.osm.pbf");
+
+    let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
+    let graph = osm_reader.build_graph();
+
+    println!("Graph built");
+
+    let app_state = AppState {
+        app_name: String::from("OSM4Routing"),
+        graph: graph,
+    };
+
+    let app_data = web::Data::new(app_state);
+
+    println!("Starting server...");
+
+    // start server
+    let config = move |cfg: &mut ServiceConfig| {
+        cfg.service(route)
+            .service(calculate_route)
+            .app_data(app_data.clone());
+    };
+
+    Ok(config.into())
+}
+
+//#[actix_web::main]
+async fn main_actix() -> std::io::Result<()> {
     // change to main to start server
 
     let current_dir = env::current_dir().expect("Failed to get current directory");
