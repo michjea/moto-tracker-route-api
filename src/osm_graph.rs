@@ -1,12 +1,26 @@
 use osmpbfreader::objects::{Node, NodeId, Way, WayId};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
+use std::fs::File;
+use std::io::Write;
+
+struct JsonNode {
+    latitude: f64,
+    longitude: f64,
+}
 
 #[derive(Debug, Clone)]
 pub struct OSMGraph {
     pub nodes: HashMap<NodeId, Node>,
     pub ways: HashMap<WayId, Way>,
     pub edges: Vec<Edge>,
+
+    // TODO : add a variable to store the edges starting from a node
+    pub edges_from_node: HashMap<NodeId, Vec<Edge>>,
+
+    pub empty_edges: Vec<Edge>,
 }
 
 impl OSMGraph {
@@ -15,6 +29,8 @@ impl OSMGraph {
             nodes: HashMap::new(),
             ways: HashMap::new(),
             edges: Vec::new(),
+            edges_from_node: HashMap::new(),
+            empty_edges: Vec::new(),
         }
     }
 
@@ -109,21 +125,18 @@ impl OSMGraph {
         nearest_node_id
     }
 
-    pub fn reconstruct_path(
-        &self,
-        came_from: &HashMap<NodeId, NodeId>,
-        mut current: NodeId,
-    ) -> Vec<NodeId> {
-        let mut total_path = Vec::new();
+    pub fn reconstruct_path(&self, visited_nodes: &Vec<NodeId>) -> serde_json::Value {
+        let path = visited_nodes
+            .iter()
+            .map(|node_id| {
+                let node = self.nodes.get(node_id).unwrap();
+                json!({"latitude": node.lat(), "longitude": node.lon()})
+            })
+            .collect::<Vec<_>>();
 
-        for node in came_from {
-            total_path.push(*node.1);
-        }
+        let json_obj = json!({ "path": path });
 
-        total_path.reverse();
-
-        println!("Reconstructed path: {:?}", total_path);
-        total_path
+        json_obj
     }
 
     pub fn combine_paths(&self, path_1: Vec<NodeId>, path_2: Vec<NodeId>) -> Vec<NodeId> {
@@ -177,6 +190,19 @@ impl OSMGraph {
         //println!("Found {} edges from node: {:?}", edges.len(), node_id);
 
         edges
+    }
+
+    pub fn add_edge_from_node(&mut self, node_id: NodeId, edge: Edge) {
+        // add edge to edges_from_node hashmap
+        let edges = self.edges_from_node.entry(node_id).or_insert(Vec::new());
+        edges.push(edge);
+    }
+
+    pub fn get_edges_from_node_fast(&self, node_id: &NodeId) -> &Vec<Edge> {
+        // return edges from edges_from_node hashmap
+        let edges = self.edges_from_node.get(node_id);
+
+        edges.unwrap_or(&self.empty_edges)
     }
 
     pub fn get_edges_to_node(&self, node_id: NodeId) -> Vec<&Edge> {

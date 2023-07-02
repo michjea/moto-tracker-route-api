@@ -6,6 +6,8 @@ use crate::osm_graph::State;
 use osmpbfreader::objects::{Node, NodeId, Way, WayId};
 //use crate::graph::Node;
 //use crate::graph::State;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 pub fn calculate_radius() {}
 
@@ -82,7 +84,7 @@ pub fn calculate_curve_wheight() {}
     None // No path found
 }*/
 
-pub fn bidirectional_dijkstra_path_2(
+/*pub fn bidirectional_dijkstra_path_2(
     graph: &OSMGraph,
     start_node: &NodeId,
     end_node: &NodeId,
@@ -169,13 +171,14 @@ pub fn bidirectional_dijkstra_path_2(
     }
 
     None // No path found
-}
+}*/
 
 pub fn dijkstra(
     graph: &OSMGraph,
-    mut start_node: &NodeId,
+    start_node: &NodeId,
     end_node: &NodeId,
-) -> Option<Vec<NodeId>> {
+) -> Option<serde_json::Value> {
+    //Option<Vec<NodeId>> {
     let mut distances: HashMap<NodeId, f64> = HashMap::new();
 
     // fill distances with infinity
@@ -188,18 +191,14 @@ pub fn dijkstra(
     let mut heap = BinaryHeap::new();
     let mut start_edge_end_node = NodeId(-1);
 
-    // Start node edge
+    // Start node edge -> because start node is not necessarly the first node of an edge
     let start_edge: Vec<&Edge> = graph.get_edges_from_node_or_containing(*start_node);
-    //println!("Start edge: {:?}", start_edge);
-
     let start_node_edge: &Edge = &start_edge[0];
 
-    //distances.remove(&start_node_edge.from);
     distances.insert(start_node_edge.from, 0.0);
-
     heap.push(State::new(start_node_edge.from, 0.0));
 
-    let mut prev_nodes: HashMap<NodeId, NodeId> = HashMap::new();
+    let mut prev_nodes: Vec<NodeId> = Vec::new(); // TODO : prev edge ?
 
     //find edges containing end node in nodes_id
     let mut end_edges: Vec<Edge> = Vec::new();
@@ -210,75 +209,58 @@ pub fn dijkstra(
             }
         }
     }
-    //println!("End edges: {:?}", end_edges);
 
-    let end_node_edge: &NodeId = &end_edges[0].from;
-    let end_node_edge_2: &NodeId = &end_edges[0].to;
+    //let end_node_edge: &NodeId = &end_edges[0].from;
+    let end_node_edge: &NodeId = &end_edges[0].to;
 
     while let Some(State { node_id, distance }) = heap.pop() {
-        //println!("Node: {:?}", node_id);
-
         if node_id == *end_node
-            || node_id == start_edge_end_node
+            //|| node_id == start_edge_end_node
             || node_id == *end_node_edge
-            || node_id == *end_node_edge_2
+        //|| node_id == *end_node_edge_2
         {
             // Intersection point found
             println!("Intersection point found: {:?}", node_id);
-            return Some(graph.reconstruct_path(&prev_nodes, node_id));
+            prev_nodes.push(node_id);
+            return Some(graph.reconstruct_path(&prev_nodes));
         }
 
         // if node is not visited, add it to visited
-        //println!("Node: {:?}", node_id);
         if !visited.contains(&node_id) {
-            //println!("Node not visited: {:?}", node_id);
             visited.insert(node_id);
         } else {
-            //println!("Node already visited: {:?}", node_id);
             continue;
         }
 
         // if distance is greater than distance to end node, skip
         if let Some(current_dist) = distances.get(&node_id) {
             if distance > *current_dist {
-                //println!("Distance greater than current distance: {:?}", node_id);
                 continue;
-            } else {
-                //println!("Distance smaller than current distance: {:?}", node_id);
             }
         }
 
-        // save in prev_nodes
-        prev_nodes.insert(node_id, node_id);
+        // push node to prev_nodes
+        prev_nodes.push(node_id);
 
-        for edge in graph.get_edges_from_node(node_id) {
+        for edge in graph.get_edges_from_node_fast(&node_id) {
+            //graph.get_edges_from_node(node_id) {
             // if node is not visited
-            //println!("Edge: {:?}", edge);
-
             if !visited.contains(&edge.to) {
-                //println!("Edge not visited: {:?}", edge);
-
                 let new_dist = distance + edge.weight;
 
                 // if node is not in distances
-                if !distances.contains_key(&edge.to) {
+                if !distances.contains_key(&edge.to) || new_dist < distances[&edge.to] {
                     heap.push(State::new(edge.to, new_dist));
                     distances.insert(edge.to, new_dist);
-                } else if new_dist < distances[&edge.to] {
-                    // modify node in heap
-                    heap.push(State::new(edge.to, new_dist));
-                    //distances.remove(&edge.to);
-                    distances.insert(edge.to, new_dist);
-                    //println!("Node: {:?}, new_dist: {:?}", edge.to, new_dist);
                 }
 
                 // check if end node is in the nodes_ids of the edge
-                for node_id_ in &edge.nodes_ids {
+                /*for node_id_ in &edge.nodes_ids {
                     if node_id_ == end_node {
                         start_edge_end_node = edge.to;
                         //println!("Start edge end node: {:?}", start_edge_end_node);
                     }
-                }
+                }*/
             }
         }
     }

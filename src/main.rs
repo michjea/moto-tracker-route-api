@@ -3,29 +3,19 @@ mod osm_graph;
 mod osm_reader;
 mod route_calculation;
 
-//use graph::Graph;
 use osm_graph::Edge;
+use osm_graph::OSMGraph;
 use osm_reader::OSMReader;
 use osmpbfreader::objects::{Node, NodeId, Tags, Way, WayId};
-use std::env;
-//use graph::Node;
-//use graph::Edge;
-//use osm4routing;
-//use osm4routing::Edge;
-//use osm4routing::Node;
-//use osm4routing::OsmObj::Node;
-//use osm4routing::osm4routing::models::Node;
-//use osm4routing::models::Node;
-use osm_graph::OSMGraph;
-use route_calculation::bidirectional_dijkstra_path_2;
+//use route_calculation::bidirectional_dijkstra_path_2;
 use route_calculation::dijkstra;
+use std::env;
 
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 
-fn main() {
+fn start() {
     let current_dir = env::current_dir().expect("Failed to get current directory");
     let file_path = current_dir.join("data").join("switzerland-latest.osm.pbf");
-    //let file_path = current_dir.join("data").join("luxembourg-latest.osm.pbf");
 
     let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
     let mut graph = osm_reader.build_graph();
@@ -43,6 +33,8 @@ fn main() {
     // coordinates of Saignelégier
     let coords_saignelegier = (47.25, 7.0);
 
+    let timer = std::time::Instant::now();
+
     let start_node = {
         let graph = &graph; // Create a new scope to borrow graph immutably
         graph
@@ -50,7 +42,11 @@ fn main() {
             .unwrap()
     };
 
+    println!("Time to get nearest node: {:?}", timer.elapsed());
+
     println!("Start node: {:?}", start_node);
+
+    let timer = std::time::Instant::now();
 
     let end_node = {
         let graph = &graph; // Create a new scope to borrow graph immutably
@@ -58,6 +54,8 @@ fn main() {
             .get_nearest_node(coords_neuchatel.0, coords_neuchatel.1)
             .unwrap()
     };
+
+    println!("Time to get nearest node: {:?}", timer.elapsed());
 
     println!("End node: {:?}", end_node);
 
@@ -98,20 +96,20 @@ fn main() {
     let start_node = NodeId(717405927);
     let end_node = NodeId(984722038);*/
 
+    let timer = std::time::Instant::now();
+
     let result = dijkstra(&graph, &start_node, &end_node);
 
-    let duration = start_time.elapsed();
+    /*let duration = start_time.elapsed();
 
     println!(
         "Time elapsed in bidirectional_dijkstra_path_2() is: {:?}",
         duration
-    );
+    );*/
 
-    println!("Result: {:?}", result);
+    println!("Time to calculate dijkstra: {:?}", timer.elapsed());
 
-    // osm4routing result is a Result<(Vec<Node>, Vec<Edge>), Error>
-
-    //let result = osm4routing::read(file_path.to_str().unwrap());
+    //println!("Result: {:?}", result);
 }
 
 // get route from A to B
@@ -119,6 +117,7 @@ fn main() {
 async fn route(path: web::Path<(String, String)>, data: web::Data<AppState>) -> impl Responder {
     //, data: web::Data<AppState>) -> impl Responder {
     // print request
+    println!("TEST");
     println!("Request: {:?}", path);
 
     let (from, to) = path.into_inner();
@@ -127,8 +126,43 @@ async fn route(path: web::Path<(String, String)>, data: web::Data<AppState>) -> 
     HttpResponse::Ok().body(format!("From {} to {}", from, to))
 }
 
+#[derive(serde::Deserialize, Debug)]
+struct CalculateRouteParams {
+    from_lat: f64,
+    from_lon: f64,
+    to_lat: f64,
+    to_lon: f64,
+}
+
+#[get("/route/")]
+async fn calculate_route(
+    params: web::Query<CalculateRouteParams>,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    // print request
+    println!("Request: {:?}", params);
+
+    let start_node = {
+        let graph = &data.graph; // Create a new scope to borrow graph immutably
+        graph
+            .get_nearest_node(params.from_lat, params.from_lon)
+            .unwrap()
+    };
+
+    let end_node = {
+        let graph = &data.graph; // Create a new scope to borrow graph immutably
+        graph
+            .get_nearest_node(params.to_lat, params.to_lon)
+            .unwrap()
+    };
+
+    let result = dijkstra(&data.graph, &start_node, &end_node);
+
+    HttpResponse::Ok().json(result)
+}
+
 #[actix_web::main]
-async fn start() -> std::io::Result<()> {
+async fn main() -> std::io::Result<()> {
     // change to main to start server
 
     let current_dir = env::current_dir().expect("Failed to get current directory");
@@ -145,14 +179,21 @@ async fn start() -> std::io::Result<()> {
         graph: graph,
     };
 
-    print!("Starting server...");
+    let app_data = web::Data::new(app_state);
+
+    println!("Starting server...");
 
     // start server
-    HttpServer::new(move || App::new().data(app_state.clone()).service(route))
-        //.bind("|| App::new().data(app_state.clone()).service(route))
-        .bind(("127.0.0.1", 8080))?
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .app_data(app_data.clone())
+            .service(route)
+            .service(calculate_route)
+    })
+    //.bind("|| App::new().data(app_state.clone()).service(route))
+    .bind(("127.0.0.1", 4242))?
+    .run()
+    .await
 }
 
 #[derive(Clone)]

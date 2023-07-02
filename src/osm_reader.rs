@@ -1,10 +1,10 @@
 extern crate osmpbfreader;
-use osmpbfreader::{OsmPbfReader, objects::OsmObj};
-use osmpbfreader::objects::{Node, Way, NodeId, WayId};
+use crate::osm_graph::Edge;
+use crate::osm_graph::OSMGraph;
+use osmpbfreader::objects::{Node, NodeId, Way, WayId};
+use osmpbfreader::{objects::OsmObj, OsmPbfReader};
 use std::fs::File;
 use std::io::BufReader;
-use crate::osm_graph::OSMGraph;
-use crate::osm_graph::Edge;
 //use crate::graph::Graph;
 //use crate::graph::Node;
 //use crate::graph::Way;
@@ -36,83 +36,38 @@ impl OSMReader {
 
         println!("Start reading file...");
 
-        let mut nodes_to_keep = Vec::new();
+        //let mut nodes_to_keep = Vec::new();
 
-        nodes_to_keep.push(0);
+        //nodes_to_keep.push(0);
 
-        let highway_to_keep = vec!["trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "trunk_link", "primary_link", "secondary_link", "tertiary_link", "living_street"];
+        let highway_to_keep = vec![
+            "trunk",
+            "primary",
+            "secondary",
+            "tertiary",
+            "unclassified",
+            "residential",
+            "trunk_link",
+            "primary_link",
+            "secondary_link",
+            "tertiary_link",
+            "living_street",
+        ];
 
-        // Read only ways in parallel, that are in highway_to_keep
-
-
-
-        /*for obj in pbf_reader.par_iter() {
-            //use std::process::exit;
-            //let obj = obj.unwrap_or_else(|e| {println!("{:?}", e); exit(1)});
-
-            match obj.unwrap() {
-                OsmObj::Node(node) => {
-                    // get tags in HashMap
-                    let mut tags = HashMap::new();
-
-                    for (key, value) in node.tags.iter() {
-                        tags.insert(key.to_string(), value.to_string());
-                    }
-                    
-                    // NodeId is i64
-                    let id = node.id.0 as i64;
-
-                    let lat = node.decimicro_lat as f64 / 10_000_000.0;
-                    let lon = node.decimicro_lon as f64 / 10_000_000.0;
-
-                    //println!("lat: {:?}", lat);
-
-                    graph.add_node(Node::new(id, lat, lon, tags));
-
-                    //println!("Node: {:?}", node);
-                },
-                OsmObj::Way(way) => {
-                    let id = way.id.0 as i64;
-
-                    let mut tags = HashMap::new();
-
-                    for (key, value) in way.tags.iter() {
-                        tags.insert(key.to_string(), value.to_string());
-                    }
-
-                    // only add ways with highway tag, and with highway tag in highway_to_keep
-                    if !tags.contains_key("highway") || !highway_to_keep.contains(&tags["highway"].as_str()) {
-                        continue;
-                    }
-
-                    let node_ids: Vec<i64> = way.nodes.iter().map(|node| node.0 as i64).collect();
-
-                    // add node ids to nodes to keep
-                    for node_id in &node_ids {
-                        nodes_to_keep.push(*node_id);
-                    }
-
-                    graph.add_way(Way::new(id, node_ids.clone(), tags));
-                    
-                    //println!("Way: {:?}", way);
-                },
-                OsmObj::Relation(relation) => {
-                    //println!("Relation: {:?}", relation);
-                    //println!("Relation: {:?}", relation.tags);
-                },
-            }
-        }*/
-
-        let objs = pbf_reader.get_objs_and_deps(|obj| {
-            obj.is_way() && obj.tags().contains_key("highway") && highway_to_keep.contains(&obj.tags()["highway"].as_str())
-        }).unwrap();
+        let objs = pbf_reader
+            .get_objs_and_deps(|obj| {
+                obj.is_way()
+                    && obj.tags().contains_key("highway")
+                    && highway_to_keep.contains(&obj.tags()["highway"].as_str())
+            })
+            .unwrap();
 
         println!("Read file in {} seconds", start_time.elapsed().as_secs());
 
         let start_time = std::time::Instant::now();
 
         let mut link_counter: HashMap<NodeId, i64> = HashMap::new();
-        
+
         let mut ways: Vec<Way> = Vec::new();
 
         for (id, obj) in &objs {
@@ -139,7 +94,7 @@ impl OSMReader {
         }
 
         // parse all ways a second time; a way will normally become one edge, but if any nodes apart from the first and the last have a link counter greater than one, then split the way into two edges at that point.
-        
+
         // for each way in graph
         for way in &ways {
             // for each node in way
@@ -203,18 +158,27 @@ impl OSMReader {
                         // from: i64, to: i64, distance: f64, weight, nodes_ids: Vec<i64>
                         //println!("Distance: {:?}", distance);
 
-                        if (distance < 1.0)
-                        {
+                        if (distance < 1.0) {
                             //println!("Distance: {:?}", distance);
                         }
 
-                        osm_graph.add_edge(Edge::new(source, *node, distance, distance, way1.nodes.clone()));
+                        let edge = Edge::new(source, *node, distance, distance, way1.nodes.clone());
 
+                        osm_graph.add_edge(edge.clone());
 
-                        let nodes = way1.nodes.clone().into_iter().rev().collect::<Vec<NodeId>>();
+                        osm_graph.add_edge_from_node(source, edge.clone());
 
-                        if(!one_way) {
-                            osm_graph.add_edge(Edge::new(*node, source, distance, distance, nodes));
+                        let nodes = way1
+                            .nodes
+                            .clone()
+                            .into_iter()
+                            .rev()
+                            .collect::<Vec<NodeId>>();
+
+                        if (!one_way) {
+                            let edge = Edge::new(*node, source, distance, distance, nodes);
+                            osm_graph.add_edge(edge.clone());
+                            osm_graph.add_edge_from_node(*node, edge.clone());
                         }
 
                         source = *node;
@@ -234,24 +198,33 @@ impl OSMReader {
                         distance += OSMGraph::haversine_distance(node1.lat() as f64 / 10_000_000.0, node1.lon() as f64 / 10_000_000.0, node2.lat() as f64 / 10_000_000.0, node2.lon() as f64 / 10_000_000.0);
                     }*/
 
-                    osm_graph.add_edge(Edge::new(source, *node, distance, distance, way.nodes[source_index..way.nodes.len()].to_vec()));
+                    let edge = Edge::new(
+                        source,
+                        *node,
+                        distance,
+                        distance,
+                        way.nodes[source_index..way.nodes.len()].to_vec(),
+                    );
+
+                    osm_graph.add_edge(edge.clone());
+                    osm_graph.add_edge_from_node(source, edge.clone());
 
                     let nodes = way.nodes.clone().into_iter().rev().collect::<Vec<NodeId>>();
 
-                    if(!one_way) {
-                        osm_graph.add_edge(Edge::new(*node, source, distance, distance, nodes));
+                    if (!one_way) {
+                        let edge = Edge::new(*node, source, distance, distance, nodes);
+                        osm_graph.add_edge(edge.clone());
+                        osm_graph.add_edge_from_node(*node, edge.clone());
                     }
                 }
             }
         }
-
 
         println!("Build graph in {} seconds", start_time.elapsed().as_secs());
 
         println!("Nodes count: {}", osm_graph.get_node_count());
         println!("Ways count: {}", osm_graph.get_way_count());
         println!("Edges count: {}", osm_graph.get_edge_count());
-
 
         /*
         // for all nodes, check if they are in nodes_to_keep, if not, remove them
@@ -272,7 +245,7 @@ impl OSMReader {
             if !nodes_to_keep.contains(node_id) {
                 //println!("Node id: {} count: {}", node_id, count);
                 count += 1;
-                
+
                 // directly remove node from graph
                 graph.remove_node(*node_id);
 
@@ -301,10 +274,10 @@ impl OSMReader {
 
         // remove nodes from graph that are not in nodes_to_keep
         graph.nodes.retain(|node_id, _| nodes_to_keep.contains(node_id));
-        
+
         println!("Split ways into edges...");
         let ways: Vec<Way> = graph.get_ways().values().cloned().collect();
-        
+
         // Split ways into edges
         for way in ways {
             let node_ids: &Vec<i64> = way.get_node_ids();
@@ -330,7 +303,7 @@ impl OSMReader {
         let end_time = std::time::Instant::now();
 
         println!("Done");
-        
+
         println!("Time elapsed: {:?}", end_time.duration_since(start_time));
 
 
