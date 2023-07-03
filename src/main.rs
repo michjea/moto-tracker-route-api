@@ -173,8 +173,7 @@ async fn calculate_route(
 }
 
 #[shuttle_runtime::main]
-async fn actix_web(
-    #[shuttle_static_folder::StaticFolder(folder = "static")] static_folder: PathBuf,
+async fn actix_web(/*#[shuttle_static_folder::StaticFolder(folder = "static")] static_folder: PathBuf,*/
 ) -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
     // change to main to start server
 
@@ -196,12 +195,14 @@ async fn actix_web(
 
     let name: String = format!("swiss-{}.pbf", timestamp);
 
-    let file_path = static_folder.join(&name);
+    let static_folder = "static/";
+    //let file_path = static_folder.join(&name);
+    let file_path = format!("{}{}", static_folder, name);
     println!("Saving file...");
 
     match response {
         Ok(mut res) => {
-            let mut file = File::create(file_path).expect("Failed to create file");
+            let mut file = File::create(&file_path).expect("Failed to create file");
             match res.bytes().await {
                 Ok(bytes) => {
                     println!("Writing file...");
@@ -216,9 +217,9 @@ async fn actix_web(
 
     println!("File saved !");
 
-    let file_path = static_folder.join(name);
+    //let file_path = static_folder.join(name);
 
-    let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
+    let mut osm_reader = OSMReader::new(file_path);
     let graph = osm_reader.build_graph();
 
     println!("Graph built");
