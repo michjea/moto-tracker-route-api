@@ -174,7 +174,7 @@ async fn calculate_route(
 
 #[shuttle_runtime::main]
 async fn actix_web(
-    #[shuttle_static_folder::StaticFolder] static_folder: PathBuf,
+    #[shuttle_static_folder::StaticFolder(folder = "static")] static_folder: PathBuf,
 ) -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
     // change to main to start server
 
