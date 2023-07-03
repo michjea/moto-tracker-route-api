@@ -10,6 +10,7 @@ use osmpbfreader::objects::{Node, NodeId, Tags, Way, WayId};
 //use route_calculation::bidirectional_dijkstra_path_2;
 use route_calculation::dijkstra;
 use std::env;
+use std::path::PathBuf;
 
 use actix_web::{get, post, web, web::ServiceConfig, App, HttpResponse, HttpServer, Responder};
 use shuttle_actix_web::ShuttleActixWeb;
@@ -163,12 +164,17 @@ async fn calculate_route(
 }
 
 #[shuttle_runtime::main]
-async fn actix_web() -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
+async fn actix_web(
+    #[shuttle_static_folder::StaticFolder] static_folder: PathBuf,
+) -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
     // change to main to start server
 
-    let current_dir = env::current_dir().expect("Failed to get current directory");
-    let file_path = current_dir.join("data").join("switzerland-latest.osm.pbf");
+    //let current_dir = env::current_dir().expect("Failed to get current directory");
+    //let file_path = current_dir.join("data").join("switzerland-latest.osm.pbf");
     //let file_path = current_dir.join("data").join("luxembourg-latest.osm.pbf");
+
+    // use the static folder fot path
+    let file_path = static_folder.join("switzerland-latest.osm.pbf");
 
     let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
     let graph = osm_reader.build_graph();
