@@ -3,6 +3,7 @@ mod osm_graph;
 mod osm_reader;
 mod route_calculation;
 
+use actix_web::cookie::time::macros::datetime;
 use osm_graph::Edge;
 use osm_graph::OSMGraph;
 use osm_reader::OSMReader;
@@ -14,6 +15,14 @@ use std::path::PathBuf;
 
 use actix_web::{get, post, web, web::ServiceConfig, App, HttpResponse, HttpServer, Responder};
 use shuttle_actix_web::ShuttleActixWeb;
+
+use chrono::Utc;
+use std::fs::File;
+use std::io::copy;
+use std::io::Write;
+
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 
 fn start() {
     let current_dir = env::current_dir().expect("Failed to get current directory");
@@ -174,7 +183,41 @@ async fn actix_web(
     //let file_path = current_dir.join("data").join("luxembourg-latest.osm.pbf");
 
     // use the static folder fot path
-    let file_path = static_folder.join("switzerland-latest.osm.pbf");
+    // let file_path = static_folder.join("switzerland-latest.osm.pbf");
+
+    let url = "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf";
+
+    println!("Downloading file...");
+
+    let response = reqwest::get(url).await;
+
+    let date_time = Utc::now();
+    let timestamp: i64 = date_time.timestamp();
+
+    let name: String = format!("swiss-{}.pbf", timestamp);
+
+    let file_name: String = format!("static/{}", name);
+
+    println!("Saving file...");
+
+    match response {
+        Ok(mut res) => {
+            let mut file = File::create(&file_name).expect("Failed to create file");
+            match res.bytes().await {
+                Ok(bytes) => {
+                    println!("Writing file...");
+                    file.write_all(&bytes).expect("Failed to write to file");
+                    println!("File downloaded successfully");
+                }
+                Err(_) => println!("Failed to save file"),
+            }
+        }
+        Err(_) => println!("Failed to download file"),
+    }
+
+    println!("File saved !");
+
+    let file_path = static_folder.join(name);
 
     let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
     let graph = osm_reader.build_graph();
