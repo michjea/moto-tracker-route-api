@@ -196,13 +196,12 @@ async fn actix_web(
 
     let name: String = format!("swiss-{}.pbf", timestamp);
 
-    let file_name: String = format!("static/{}", name);
-
+    let file_path = static_folder.join(&name);
     println!("Saving file...");
 
     match response {
         Ok(mut res) => {
-            let mut file = File::create(&file_name).expect("Failed to create file");
+            let mut file = File::create(file_path).expect("Failed to create file");
             match res.bytes().await {
                 Ok(bytes) => {
                     println!("Writing file...");
