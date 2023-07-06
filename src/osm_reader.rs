@@ -5,11 +5,13 @@ use osmpbfreader::objects::{Node, NodeId, Way, WayId};
 use osmpbfreader::{objects::OsmObj, OsmPbfReader};
 use std::fs::File;
 use std::io::BufReader;
+use std::io::Cursor;
 //use crate::graph::Graph;
 //use crate::graph::Node;
 //use crate::graph::Way;
 //use crate::graph::Edge;
 //use crate::graph::Relation;
+use log::{info, warn};
 
 use std::collections::HashMap;
 
@@ -24,22 +26,7 @@ impl OSMReader {
         }
     }
 
-    pub fn build_graph(&mut self) -> OSMGraph {
-        let file = File::open(&self.file_path).expect("Unable to open file");
-        let reader = BufReader::new(file);
-        let mut pbf_reader = OsmPbfReader::new(reader);
-
-        let start_time = std::time::Instant::now();
-
-        //let mut graph = Graph::new();
-        let mut osm_graph = OSMGraph::new();
-
-        println!("Start reading file...");
-
-        //let mut nodes_to_keep = Vec::new();
-
-        //nodes_to_keep.push(0);
-
+    pub async fn build_graph(&mut self) -> OSMGraph {
         let highway_to_keep = vec![
             "trunk",
             "primary",
@@ -54,6 +41,48 @@ impl OSMReader {
             "living_street",
         ];
 
+        // WIth Overpass API
+        /*let overpass_url = "https://overpass-api.de/api/interpreter";
+        let overpass_query = r#"
+            [out:json];
+            area["ISO3166-2"="CH-JU"];
+            (
+                way["highway"~"trunk|primary|secondary|tertiary|unclassified|residential|trunk_link|primary_link|secondary_link|tertiary_link|living_street"](area);
+                node(w);
+            );
+            out body;
+        "#;
+
+        /*
+        area["name"="Switzerland"];
+            (
+                way["highway"~"trunk|primary|secondary|tertiary|unclassified|residential|trunk_link|primary_link|secondary_link|tertiary_link|living_street"](area);
+                node(w);
+            );
+            out; */
+
+        println!("Start downloading data...");
+
+        let client = reqwest::Client::new();
+        let response = client.post(overpass_url).body(overpass_query).send();
+
+        // Parse response
+        let response = response.await.unwrap().text().await.unwrap();
+
+        //println!("{}", &response);
+
+        let response = response.as_bytes();
+
+        println!("Downloaded data");
+
+        let mut pbf_reader = OsmPbfReader::new(Cursor::new(response));
+
+        let start_time = std::time::Instant::now();
+
+        let mut osm_graph = OSMGraph::new();
+
+        println!("Start reading file...");
+
         let objs = pbf_reader
             .get_objs_and_deps(|obj| {
                 obj.is_way()
@@ -62,6 +91,29 @@ impl OSMReader {
             })
             .unwrap();
 
+        println!("Read file in {} seconds", start_time.elapsed().as_secs());*/
+
+        // With file
+        let file = File::open(&self.file_path).expect("Unable to open file");
+        let reader = BufReader::new(file);
+        let mut pbf_reader = OsmPbfReader::new(reader);
+
+        let start_time = std::time::Instant::now();
+
+        let mut osm_graph = OSMGraph::new();
+
+        info!("Start reading file...");
+        println!("Start reading file...");
+
+        let objs = pbf_reader
+            .get_objs_and_deps(|obj| {
+                obj.is_way()
+                    && obj.tags().contains_key("highway")
+                    && highway_to_keep.contains(&obj.tags()["highway"].as_str())
+            })
+            .unwrap();
+
+        info!("Read file in {} seconds", start_time.elapsed().as_secs());
         println!("Read file in {} seconds", start_time.elapsed().as_secs());
 
         let start_time = std::time::Instant::now();
@@ -220,10 +272,14 @@ impl OSMReader {
             }
         }
 
+        info!("Build graph in {} seconds", start_time.elapsed().as_secs());
         println!("Build graph in {} seconds", start_time.elapsed().as_secs());
 
+        info!("Nodes count: {}", osm_graph.get_node_count());
         println!("Nodes count: {}", osm_graph.get_node_count());
+        info!("Ways count: {}", osm_graph.get_way_count());
         println!("Ways count: {}", osm_graph.get_way_count());
+        info!("Edges count: {}", osm_graph.get_edge_count());
         println!("Edges count: {}", osm_graph.get_edge_count());
 
         /*

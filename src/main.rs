@@ -24,12 +24,14 @@ use std::io::Write;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
-fn start() {
+use log::{info, warn};
+
+async fn start() {
     let current_dir = env::current_dir().expect("Failed to get current directory");
     let file_path = current_dir.join("data").join("switzerland-latest.osm.pbf");
 
     let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
-    let mut graph = osm_reader.build_graph();
+    let mut graph = osm_reader.build_graph().await;
     //let mut graph = OSMGraph::new();
 
     // calculate dijkstra
@@ -53,9 +55,9 @@ fn start() {
             .unwrap()
     };
 
-    println!("Time to get nearest node: {:?}", timer.elapsed());
+    info!("Time to get nearest node: {:?}", timer.elapsed());
 
-    println!("Start node: {:?}", start_node);
+    info!("Start node: {:?}", start_node);
 
     let timer = std::time::Instant::now();
 
@@ -66,9 +68,9 @@ fn start() {
             .unwrap()
     };
 
-    println!("Time to get nearest node: {:?}", timer.elapsed());
+    info!("Time to get nearest node: {:?}", timer.elapsed());
 
-    println!("End node: {:?}", end_node);
+    info!("End node: {:?}", end_node);
 
     // Tests
 
@@ -129,7 +131,12 @@ async fn route(path: web::Path<(String, String)>, data: web::Data<AppState>) -> 
     //, data: web::Data<AppState>) -> impl Responder {
     // print request
     println!("TEST");
-    println!("Request: {:?}", path);
+    info!("Request: {:?}", path);
+
+    // test use of data
+    /*let graph = &data.graph;
+    let node = graph.get_nearest_node(47.0, 7.0).unwrap();
+    info!("Node: {:?}", node);*/
 
     let (from, to) = path.into_inner();
 
@@ -145,13 +152,20 @@ struct CalculateRouteParams {
     to_lon: f64,
 }
 
-#[get("/route/")]
+#[derive(serde::Deserialize, Debug)]
+struct TestParams {
+    num: f64,
+    text: String,
+}
+
+/* !!! Remove last slash for deploy (issue Shuttle) !!! */
+#[get("/calculate-route")]
 async fn calculate_route(
     params: web::Query<CalculateRouteParams>,
     data: web::Data<AppState>,
 ) -> impl Responder {
     // print request
-    println!("Request: {:?}", params);
+    info!("Request: {:?}", params);
 
     let start_node = {
         let graph = &data.graph; // Create a new scope to borrow graph immutably
@@ -173,19 +187,12 @@ async fn calculate_route(
 }
 
 #[shuttle_runtime::main]
-async fn actix_web(/*#[shuttle_static_folder::StaticFolder(folder = "static")] static_folder: PathBuf,*/
+async fn actix_web(
+    #[shuttle_static_folder::StaticFolder(folder = "static")] static_folder: PathBuf,
 ) -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
-    // change to main to start server
-
-    //let current_dir = env::current_dir().expect("Failed to get current directory");
-    //let file_path = current_dir.join("data").join("switzerland-latest.osm.pbf");
-    //let file_path = current_dir.join("data").join("luxembourg-latest.osm.pbf");
-
-    // use the static folder fot path
-    // let file_path = static_folder.join("switzerland-latest.osm.pbf");
-
     let url = "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf";
 
+    info!("Downloading file...");
     println!("Downloading file...");
 
     let response = reqwest::get(url).await;
@@ -195,9 +202,10 @@ async fn actix_web(/*#[shuttle_static_folder::StaticFolder(folder = "static")] s
 
     let name: String = format!("swiss-{}.pbf", timestamp);
 
-    let static_folder = "static/";
-    //let file_path = static_folder.join(&name);
-    let file_path = format!("{}{}", static_folder, name);
+    //let static_folder = "static/";
+    let file_path = static_folder.join(&name);
+    //let file_path = format!("{}{}", static_folder.to_str(), name);
+    info!("Saving file...");
     println!("Saving file...");
 
     match response {
@@ -205,23 +213,24 @@ async fn actix_web(/*#[shuttle_static_folder::StaticFolder(folder = "static")] s
             let mut file = File::create(&file_path).expect("Failed to create file");
             match res.bytes().await {
                 Ok(bytes) => {
-                    println!("Writing file...");
+                    info!("Writing file...");
                     file.write_all(&bytes).expect("Failed to write to file");
-                    println!("File downloaded successfully");
+                    info!("File downloaded successfully");
                 }
-                Err(_) => println!("Failed to save file"),
+                Err(_) => warn!("Failed to save file"),
             }
         }
-        Err(_) => println!("Failed to download file"),
+        Err(_) => warn!("Failed to download file"),
     }
 
+    info!("File saved !");
     println!("File saved !");
 
-    //let file_path = static_folder.join(name);
+    //let file_path = static_folder.join(name);*/
+    let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
+    let graph = osm_reader.build_graph().await;
 
-    let mut osm_reader = OSMReader::new(file_path);
-    let graph = osm_reader.build_graph();
-
+    info!("Graph built");
     println!("Graph built");
 
     let app_state = AppState {
@@ -231,13 +240,14 @@ async fn actix_web(/*#[shuttle_static_folder::StaticFolder(folder = "static")] s
 
     let app_data = web::Data::new(app_state);
 
+    info!("Starting server...");
     println!("Starting server...");
 
     // start server
     let config = move |cfg: &mut ServiceConfig| {
-        cfg.service(route)
-            .service(calculate_route)
-            .app_data(app_data.clone());
+        cfg.app_data(app_data.clone())
+            .service(route)
+            .service(calculate_route);
     };
 
     Ok(config.into())
@@ -258,7 +268,7 @@ async fn main_actix() -> std::io::Result<()> {
 
     let app_state = AppState {
         app_name: String::from("OSM4Routing"),
-        graph: graph,
+        graph: graph.await,
     };
 
     let app_data = web::Data::new(app_state);

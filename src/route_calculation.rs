@@ -198,7 +198,7 @@ pub fn dijkstra(
     distances.insert(start_node_edge.from, 0.0);
     heap.push(State::new(start_node_edge.from, 0.0));
 
-    let mut prev_nodes: Vec<NodeId> = Vec::new(); // TODO : prev edge ?
+    let mut prev_nodes: HashMap<NodeId, NodeId> = HashMap::new(); // TODO : prev edge ?
 
     //find edges containing end node in nodes_id
     let mut end_edges: Vec<Edge> = Vec::new();
@@ -221,8 +221,22 @@ pub fn dijkstra(
         {
             // Intersection point found
             println!("Intersection point found: {:?}", node_id);
-            prev_nodes.push(node_id);
-            return Some(graph.reconstruct_path(&prev_nodes));
+
+            // reconstruct path
+            let mut path: Vec<NodeId> = Vec::new();
+            let mut current_node = node_id;
+            //println!("start_node: {:?}", *start_node);
+            //println!("start_node_edge.from: {:?}", start_node_edge.from);
+
+            while current_node != start_node_edge.from {
+                path.push(current_node);
+                current_node = prev_nodes[&current_node];
+                //println!("current_node: {:?}", current_node);
+            }
+
+            path.push(*start_node);
+
+            return Some(graph.reconstruct_path(&path));
         }
 
         // if node is not visited, add it to visited
@@ -240,7 +254,7 @@ pub fn dijkstra(
         }
 
         // push node to prev_nodes
-        prev_nodes.push(node_id);
+        //prev_nodes.push(node_id);
 
         for edge in graph.get_edges_from_node_fast(&node_id) {
             //graph.get_edges_from_node(node_id) {
@@ -252,6 +266,8 @@ pub fn dijkstra(
                 if !distances.contains_key(&edge.to) || new_dist < distances[&edge.to] {
                     heap.push(State::new(edge.to, new_dist));
                     distances.insert(edge.to, new_dist);
+                    //prev_nodes.push(node_id);
+                    prev_nodes.insert(edge.to, node_id);
                 }
 
                 // check if end node is in the nodes_ids of the edge
