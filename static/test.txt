@@ -1,1 +1,1 @@
-test
+File here just to have a static folder :)

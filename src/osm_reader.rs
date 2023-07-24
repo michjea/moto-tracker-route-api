@@ -28,13 +28,13 @@ impl OSMReader {
 
     pub async fn build_graph(&mut self) -> OSMGraph {
         let highway_to_keep = vec![
-            "trunk",
+            //"trunk",
             "primary",
             "secondary",
             "tertiary",
             "unclassified",
             "residential",
-            "trunk_link",
+            //"trunk_link",
             "primary_link",
             "secondary_link",
             "tertiary_link",
@@ -154,7 +154,19 @@ impl OSMReader {
             let mut source = NodeId(0);
 
             // check if way is one way or two way
-            let one_way = way.tags.contains_key("oneway") && way.tags["oneway"] == "yes";
+            let mut one_way = way.tags.contains_key("oneway") && way.tags["oneway"] == "yes";
+
+            // check if way is a roundabout
+            let roundabout =
+                way.tags.contains_key("junction") && way.tags["junction"] == "roundabout";
+
+            // print if way is a roundabout and if it is one way
+            if roundabout && one_way {
+                //println!("Roundabout is one way");
+            } else if roundabout {
+                //println!("Roundabout is two way");
+                one_way = true;
+            }
 
             for node in &way.nodes {
                 // si c'est le premier
@@ -166,55 +178,97 @@ impl OSMReader {
                     // if node has a link counter greater than one
                     if link_counter[node] > 1 {
                         // split way into two edges at that point
-                        //println!("Split way into two edges at that point");
-                        //println!("Way: {:?}", way);
-                        //println!("Node: {:?}", node);
-                        //println!("Link counter: {:?}", link_counter[node]);
-                        //println!("Way nodes: {:?}", way.nodes);
-                        //println!("Way nodes len: {:?}", way.nodes.len());
-
                         // get index of node in way
                         let index = way.nodes.iter().position(|x| *x == *node).unwrap();
 
-                        //println!("Index: {:?}", index);
-
                         // create two new ways
                         let mut way1 = way.clone();
-                        //let mut way2 = way.clone();
-
-                        //println!("Way1: {:?}", way1);
-                        //println!("Way2: {:?}", way2);
 
                         // set way1 nodes
                         let source_index = way.nodes.iter().position(|x| *x == source).unwrap();
                         way1.nodes = way.nodes[source_index..index + 1].to_vec();
 
-                        let mut distance = way1.nodes.len() as f64;
+                        let mut weight = 1.0;
+                        let mut distance = 0.0;
 
-                        /*for i in 0..way1.nodes.len() - 1 {
+                        // calculate distance
+                        for i in 0..way1.nodes.len() - 1 {
                             let node1 = osm_graph.get_node(way1.nodes[i]).unwrap();
                             let node2 = osm_graph.get_node(way1.nodes[i + 1]).unwrap();
-                            distance += OSMGraph::haversine_distance(node1.lat() as f64 / 10_000_000.0, node1.lon() as f64 / 10_000_000.0, node2.lat() as f64 / 10_000_000.0, node2.lon() as f64 / 10_000_000.0);
-                        }*/
 
-                        //println!("Distance: {:?}", distance);
+                            let distance1 = OSMGraph::haversine_distance(
+                                node1.lat(),
+                                node1.lon(),
+                                node2.lat(),
+                                node2.lon(),
+                            );
 
-                        //println!("Way1: {:?}", way1);
-
-                        // set way2 nodes
-                        //way2.nodes = way.nodes[index..way.nodes.len()].to_vec();
-
-                        // add way1 and way2 to graph
-                        //osm_graph.add_way(way1);
-                        //osm_graph.add_way(way2);
-                        // from: i64, to: i64, distance: f64, weight, nodes_ids: Vec<i64>
-                        //println!("Distance: {:?}", distance);
-
-                        if (distance < 1.0) {
-                            //println!("Distance: {:?}", distance);
+                            distance += distance1;
                         }
 
-                        let edge = Edge::new(source, *node, distance, distance, way1.nodes.clone());
+                        let mut CURVY = 0.0;
+                        let mut MIDDLE = 0.0;
+                        let mut STRAIGHT = 0.0;
+
+                        // for each three nodes, calculate radius of the circle that passes through them
+                        for i in 0..way1.nodes.len() - 2 {
+                            let node1 = osm_graph.get_node(way1.nodes[i]).unwrap();
+                            let node2 = osm_graph.get_node(way1.nodes[i + 1]).unwrap();
+                            let node3 = osm_graph.get_node(way1.nodes[i + 2]).unwrap();
+
+                            let radius = OSMGraph::circle_radius(node1, node2, node3);
+
+                            // attributes a weight to the edge based on the radius : small curve, big curve, straight line
+                            if (radius < 100.0) {
+                                weight += 0.0; // * total_distance;
+                                CURVY += 1.0;
+                            } else if (radius < 200.0) {
+                                weight += 0.0; // * total_distance;
+                                MIDDLE += 1.0;
+                            } else {
+                                weight += 0.0; //* total_distance;
+                                STRAIGHT += 1.0;
+                            }
+                        }
+
+                        // calculate weight based on the number of curves (CURVY, MIDDLE, STRAIGHT) and the distance
+                        if (CURVY > MIDDLE && CURVY > STRAIGHT) {
+                            weight *= 0.5;
+                        } else if (MIDDLE > CURVY && MIDDLE > STRAIGHT) {
+                            weight *= 1.0;
+                        } else {
+                            weight *= 1.5;
+                        }
+
+                        weight *= distance;
+
+                        /*let mut distance = way1.nodes.len() as f64;
+                        let mut distance = 0.0;
+
+                        // for each node, calculate haversine distance
+                        for i in 0..way1.nodes.len() - 1 {
+                            let node1 = osm_graph.get_node(way1.nodes[i]).unwrap();
+                            let node2 = osm_graph.get_node(way1.nodes[i + 1]).unwrap();
+
+                            let distance1 = OSMGraph::haversine_distance(
+                                node1.lat(),
+                                node1.lon(),
+                                node2.lat(),
+                                node2.lon(),
+                            );
+
+                            distance += distance1;
+                        }*/
+
+                        let edge = Edge::new(
+                            source,
+                            *node,
+                            distance,
+                            weight,
+                            0.0,
+                            way1.nodes.clone(),
+                            way1.id,
+                        );
 
                         osm_graph.add_edge(edge.clone());
 
@@ -228,7 +282,8 @@ impl OSMReader {
                             .collect::<Vec<NodeId>>();
 
                         if (!one_way) {
-                            let edge = Edge::new(*node, source, distance, distance, nodes);
+                            let edge =
+                                Edge::new(*node, source, distance, weight, 0.0, nodes, way1.id);
                             osm_graph.add_edge(edge.clone());
                             osm_graph.add_edge_from_node(*node, edge.clone());
                         }
@@ -242,7 +297,10 @@ impl OSMReader {
                     // from: i64, to: i64, distance: f64, weight, nodes_ids: Vec<i64>
                     let source_index = way.nodes.iter().position(|x| *x == source).unwrap();
 
-                    let mut distance = way.nodes.len() as f64;
+                    /*let mut distance = way.nodes.len() as f64;
+                    let mut distance = 0.0;
+
+                    // for each node, calculate haversine distance
 
                     /*for i in 0..way.nodes.len() - 1 {
                         let node1 = osm_graph.get_node(way.nodes[i]).unwrap();
@@ -250,21 +308,121 @@ impl OSMReader {
                         distance += OSMGraph::haversine_distance(node1.lat() as f64 / 10_000_000.0, node1.lon() as f64 / 10_000_000.0, node2.lat() as f64 / 10_000_000.0, node2.lon() as f64 / 10_000_000.0);
                     }*/
 
+                    for i in 0..way.nodes.len() - 1 {
+                        let node1 = osm_graph.get_node(way.nodes[i]).unwrap();
+                        let node2 = osm_graph.get_node(way.nodes[i + 1]).unwrap();
+
+                        let distance1 = OSMGraph::haversine_distance(
+                            node1.lat(),
+                            node1.lon(),
+                            node2.lat(),
+                            node2.lon(),
+                        );
+
+                        distance += distance1;
+                    }*/
+
+                    let mut weight = 1.0;
+                    let mut distance = 0.0;
+
+                    for i in 0..way.nodes.len() - 1 {
+                        let node1 = osm_graph.get_node(way.nodes[i]).unwrap();
+                        let node2 = osm_graph.get_node(way.nodes[i + 1]).unwrap();
+
+                        let distance1 = OSMGraph::haversine_distance(
+                            node1.lat(),
+                            node1.lon(),
+                            node2.lat(),
+                            node2.lon(),
+                        );
+
+                        distance += distance1;
+                    }
+
+                    let mut CURVY = 0.0;
+                    let mut MIDDLE = 0.0;
+                    let mut STRAIGHT = 0.0;
+
+                    // for each three nodes, calculate radius of the circle that passes through them
+                    for i in 0..way.nodes.len() - 2 {
+                        let node1 = osm_graph.get_node(way.nodes[i]).unwrap();
+                        let node2 = osm_graph.get_node(way.nodes[i + 1]).unwrap();
+                        let node3 = osm_graph.get_node(way.nodes[i + 2]).unwrap();
+
+                        let radius = OSMGraph::circle_radius(node1, node2, node3);
+
+                        /*let distance1 = OSMGraph::haversine_distance(
+                            node1.lat(),
+                            node1.lon(),
+                            node2.lat(),
+                            node2.lon(),
+                        );
+
+                        let distance2 = OSMGraph::haversine_distance(
+                            node2.lat(),
+                            node2.lon(),
+                            node3.lat(),
+                            node3.lon(),
+                        );
+
+                        let total_distance = distance1 + distance2;
+                        distance += total_distance;*/
+
+                        // attributes a weight to the edge based on the radius : small curve, big curve, straight line
+                        if (radius < 100.0) {
+                            weight += 0.0; // * total_distance;
+                            CURVY += 1.0;
+                        } else if (radius < 200.0) {
+                            weight += 0.0; // * total_distance;
+                            MIDDLE += 1.0;
+                        } else {
+                            weight += 0.0; // * total_distance;
+                            STRAIGHT += 1.0;
+                        }
+                    }
+
+                    // Define weights for the scores (adjust these based on your preferences)
+                    let w_curvy = 1.0;
+                    let w_middle = 0.5;
+                    let w_straight = 0.2;
+
+                    // Calculate the overall score
+                    let overall_score = w_curvy * CURVY + w_middle * MIDDLE - w_straight * STRAIGHT;
+
+                    // calculate weight based on the number of curves (CURVY, MIDDLE, STRAIGHT) and the distance
+                    if (CURVY > MIDDLE && CURVY > STRAIGHT) {
+                        weight *= 0.5;
+                    } else if (MIDDLE > CURVY && MIDDLE > STRAIGHT) {
+                        weight *= 1.0;
+                    } else {
+                        weight *= 1.5;
+                    }
+
+                    weight *= distance;
+
                     let edge = Edge::new(
                         source,
                         *node,
                         distance,
-                        distance,
+                        weight,
+                        0.0,
                         way.nodes[source_index..way.nodes.len()].to_vec(),
+                        way.id,
                     );
 
                     osm_graph.add_edge(edge.clone());
                     osm_graph.add_edge_from_node(source, edge.clone());
 
-                    let nodes = way.nodes.clone().into_iter().rev().collect::<Vec<NodeId>>();
+                    let nodes = way.nodes[source_index..way.nodes.len()]
+                        .to_vec()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<NodeId>>();
+
+                    //let nodes = way.nodes.clone().into_iter().rev().collect::<Vec<NodeId>>();
 
                     if (!one_way) {
-                        let edge = Edge::new(*node, source, distance, distance, nodes);
+                        let edge = Edge::new(*node, source, distance, weight, 0.0, nodes, way.id);
                         osm_graph.add_edge(edge.clone());
                         osm_graph.add_edge_from_node(*node, edge.clone());
                     }

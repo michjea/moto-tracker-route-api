@@ -9,7 +9,9 @@ use osm_graph::OSMGraph;
 use osm_reader::OSMReader;
 use osmpbfreader::objects::{Node, NodeId, Tags, Way, WayId};
 //use route_calculation::bidirectional_dijkstra_path_2;
+use actix_cors::Cors;
 use route_calculation::dijkstra;
+use route_calculation::generate_random_loop;
 use std::env;
 use std::path::PathBuf;
 
@@ -25,6 +27,8 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
 use log::{info, warn};
+
+use serde_json::{json, Map, Value};
 
 async fn start() {
     let current_dir = env::current_dir().expect("Failed to get current directory");
@@ -128,19 +132,7 @@ async fn start() {
 // get route from A to B
 #[get("/route/{from}/{to}")]
 async fn route(path: web::Path<(String, String)>, data: web::Data<AppState>) -> impl Responder {
-    //, data: web::Data<AppState>) -> impl Responder {
-    // print request
-    println!("TEST");
-    info!("Request: {:?}", path);
-
-    // test use of data
-    /*let graph = &data.graph;
-    let node = graph.get_nearest_node(47.0, 7.0).unwrap();
-    info!("Node: {:?}", node);*/
-
     let (from, to) = path.into_inner();
-
-    //HttpResponse::Ok().body(format!("Path: "));
     HttpResponse::Ok().body(format!("From {} to {}", from, to))
 }
 
@@ -153,13 +145,20 @@ struct CalculateRouteParams {
 }
 
 #[derive(serde::Deserialize, Debug)]
+struct CalculateLoopParams {
+    from_lat: f64,
+    from_lon: f64,
+    distance: f64, // distance in meters
+}
+
+#[derive(serde::Deserialize, Debug)]
 struct TestParams {
     num: f64,
     text: String,
 }
 
 /* !!! Remove last slash for deploy (issue Shuttle) !!! */
-#[get("/calculate-route")]
+#[get("/calculate-route/")]
 async fn calculate_route(
     params: web::Query<CalculateRouteParams>,
     data: web::Data<AppState>,
@@ -181,9 +180,64 @@ async fn calculate_route(
             .unwrap()
     };
 
-    let result = dijkstra(&data.graph, &start_node, &end_node);
+    let (result, edges) = dijkstra(&data.graph, &start_node, &end_node);
+    // if result is None, return error
+    if result.is_none() {
+        return HttpResponse::BadRequest().body("No route found");
+    } else {
+        let result = result.unwrap();
+        // reconstruct path
+        let test = data
+            .graph
+            .directions_instructions_and_path(&result, &edges.unwrap());
 
-    HttpResponse::Ok().json(result)
+        let mut path = vec![];
+
+        path.push(test);
+
+        //let path = data.graph.reconstruct_path(&result);
+
+        // return test
+        HttpResponse::Ok().json(path)
+
+        //HttpResponse::Ok().json(path)
+    }
+
+    //HttpResponse::Ok().json(path)
+}
+
+#[get("/calculate-loop/")]
+async fn calculate_loop(
+    params: web::Query<CalculateLoopParams>,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    info!("Request: {:?}", params);
+
+    let start_node = {
+        let graph = &data.graph; // Create a new scope to borrow graph immutably
+        graph
+            .get_nearest_node(params.from_lat, params.from_lon)
+            .unwrap()
+    };
+
+    let result = generate_random_loop(params.distance, &data.graph, &start_node);
+
+    let mut path = vec![];
+
+    for i in 0..result.len() - 1 {
+        let node_ids = &result[i].0;
+        let edges_ids = &result[i].1;
+        let res = data
+            .graph
+            .directions_instructions_and_path(&node_ids, &edges_ids);
+
+        path.push(res);
+    }
+
+    // reconstruct path
+    //let mut path = data.graph.reconstruct_path(&result);
+
+    HttpResponse::Ok().json(path)
 }
 
 #[shuttle_runtime::main]
@@ -245,8 +299,14 @@ async fn actix_web(
 
     // start server
     let config = move |cfg: &mut ServiceConfig| {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header();
+
         cfg.app_data(app_data.clone())
             .service(route)
+            .service(calculate_loop)
             .service(calculate_route);
     };
 
@@ -277,7 +337,13 @@ async fn main_actix() -> std::io::Result<()> {
 
     // start server
     HttpServer::new(move || {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header();
+
         App::new()
+            .wrap(cors)
             .app_data(app_data.clone())
             .service(route)
             .service(calculate_route)
