@@ -1,5 +1,5 @@
 [package]
-name = "moto-tracker-route-api"
+name = "moto-trackr-route-api"
 version = "0.1.0"
 edition = "2021"
 

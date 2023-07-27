@@ -6,24 +6,27 @@ use std::collections::{BinaryHeap, HashMap};
 use std::fs::File;
 use std::io::Write;
 
-struct JsonNode {
-    latitude: f64,
-    longitude: f64,
-}
-
+/// OSMGraph struct that contains the nodes, ways and edges of the graph
+/// # Attributes
+/// * `nodes` - The nodes of the graph
+/// * `ways` - The ways of the graph
+/// * `edges` - The edges of the graph
+/// * `edges_from_node` - A hashmap that contains the edges that start from a node
+/// * `empty_edges` - An empty vector of edges
 #[derive(Debug, Clone)]
 pub struct OSMGraph {
     pub nodes: HashMap<NodeId, Node>,
     pub ways: HashMap<WayId, Way>,
     pub edges: Vec<Edge>,
-
-    // TODO : add a variable to store the edges starting from a node
     pub edges_from_node: HashMap<NodeId, Vec<Edge>>,
-
     pub empty_edges: Vec<Edge>,
 }
 
+/// OSMGraph implementation
 impl OSMGraph {
+    /// Create a new OSMGraph
+    /// # Returns
+    /// * `OSMGraph` - The new OSMGraph
     pub fn new() -> Self {
         OSMGraph {
             nodes: HashMap::new(),
@@ -34,60 +37,93 @@ impl OSMGraph {
         }
     }
 
+    /// Add a node to the graph
+    /// # Arguments
+    /// * `node` - The node to add
     pub fn add_node(&mut self, node: &Node) -> () {
         self.nodes.insert(node.id, node.clone());
     }
 
+    /// Add a way to the graph
+    /// # Arguments
+    /// * `way` - The way to add
     pub fn add_way(&mut self, way: &Way) -> () {
         self.ways.insert(way.id, way.clone());
     }
 
+    /// Add an edge to the graph
+    /// # Arguments
+    /// * `edge` - The edge to add
     pub fn add_edge(&mut self, edge: Edge) -> () {
         self.edges.push(edge);
     }
 
+    /// Get the number of nodes in the graph
+    /// # Returns
+    /// * `usize` - The number of nodes in the graph
     pub fn get_node_count(&self) -> usize {
         self.nodes.len()
     }
 
+    /// Get the number of ways in the graph
+    /// # Returns
+    /// * `usize` - The number of ways in the graph
     pub fn get_way_count(&self) -> usize {
         self.ways.len()
     }
 
+    /// Get the number of edges in the graph
+    /// # Returns
+    /// * `usize` - The number of edges in the graph
     pub fn get_edge_count(&self) -> usize {
         self.edges.len()
     }
 
+    /// Get the ways of the graph
+    /// # Returns
+    /// * `&HashMap<WayId, Way>` - A reference to the ways of the graph (key: way id, value: way)
     pub fn get_ways(&self) -> &HashMap<WayId, Way> {
         &self.ways
     }
 
+    /// Get the edges of the graph
+    /// # Returns
+    /// * `&Vec<Edge>` - A reference to the edges of the graph
     pub fn get_edges(&self) -> &Vec<Edge> {
         &self.edges
     }
 
+    /// Get a node from the graph
+    /// # Arguments
+    /// * `id` - The id of the node to get
+    /// # Returns
+    /// * `Option<&Node>` - A reference to the node if it exists, None otherwise
     pub fn get_node(&self, id: NodeId) -> Option<&Node> {
         self.nodes.get(&id)
     }
 
+    /// Get the nodes of the graph
+    /// # Returns
+    /// * `&HashMap<NodeId, Node>` - A reference to the nodes of the graph (key: node id, value: node)
     pub fn get_nodes(&self) -> &HashMap<NodeId, Node> {
         &self.nodes
     }
 
-    pub fn distance(&self, node_id_1: NodeId, node_id_2: NodeId) -> f64 {
-        let node_1 = self.nodes.get(&node_id_1).unwrap();
-        let node_2 = self.nodes.get(&node_id_2).unwrap();
-
-        let lat_1 = node_1.decimicro_lat;
-        let lon_1 = node_1.decimicro_lon;
-        let lat_2 = node_2.decimicro_lat;
-        let lon_2 = node_2.decimicro_lon;
-
-        let distance = (lat_1 - lat_2).pow(2) + (lon_1 - lon_2).pow(2);
-
-        (distance as f64).sqrt()
-    }
-
+    /// Calculate the distance between two nodes using the haversine formula
+    /// # Arguments
+    /// * `from_lat` - The latitude of the first node
+    /// * `from_lon` - The longitude of the first node
+    /// * `to_lat` - The latitude of the second node
+    /// * `to_lon` - The longitude of the second node
+    /// # Returns
+    /// * `f64` - The distance between the two nodes in meters
+    /// # Formula
+    /// * `r` - The radius of the earth in km
+    /// * `delta_lat` - The difference between the latitudes of the two nodes in radians
+    /// * `delta_lon` - The difference between the longitudes of the two nodes in radians
+    /// * `a` - The first part of the formula
+    /// * `c` - The second part of the formula
+    /// * `distance` - The distance between the two nodes in km
     pub fn haversine_distance(from_lat: f64, from_lon: f64, to_lat: f64, to_lon: f64) -> f64 {
         let r = 6371.0; // km
 
@@ -112,6 +148,12 @@ impl OSMGraph {
         distance * 1000.0 // convert to meters
     }
 
+    /// Get the nearest node from a given latitude and longitude
+    /// # Arguments
+    /// * `lat` - The latitude
+    /// * `lon` - The longitude
+    /// # Returns
+    /// * `Option<NodeId>` - The id of the nearest node if it exists, None otherwise
     pub fn get_nearest_node(&self, lat: f64, lon: f64) -> Option<NodeId> {
         let mut min_distance = std::f64::MAX;
         let mut nearest_node_id = None;
@@ -125,10 +167,14 @@ impl OSMGraph {
             }
         }
 
-        //println!("Nearest node: {:?}", nearest_node_id);
         nearest_node_id
     }
 
+    /// Reconstruction of the path from the visited nodes
+    /// # Arguments
+    /// * `visited_nodes` - The visited nodes
+    /// # Returns
+    /// * `serde_json::Value` - The path in json format
     pub fn reconstruct_path(&self, visited_nodes: &Vec<NodeId>) -> serde_json::Value {
         let path = visited_nodes
             .iter()
@@ -143,6 +189,12 @@ impl OSMGraph {
         json_obj
     }
 
+    /// Reconstruction of the path and directions instructions from the visited nodes and edges
+    /// # Arguments
+    /// * `visited_nodes` - The visited nodes
+    /// * `visited_edges` - The visited edges
+    /// # Returns
+    /// * `serde_json::Value` - The path and directions instructions in json format
     pub fn directions_instructions_and_path(
         &self,
         visited_nodes: &Vec<NodeId>,
@@ -186,33 +238,8 @@ impl OSMGraph {
                 }
 
                 is_prev_roundabout = true;
-
-                //instructions.push(json!({"instruction": "Roundabout", "distance": edge.distance_m}));
-                //println!("Roundabout");
-                //println!("{:?}", way);
-
-                // get previous edge last node id
-                // git previous edge first node id
-                let prev_edge_first_node_id = prev_edge.nodes_ids.first().unwrap();
-                let prev_edge_last_node_id = prev_edge.nodes_ids.last().unwrap();
-                //println!("Before roundabout first : {:?}", prev_edge_first_node_id);
-                //println!("Before roundabout last : {:?}", prev_edge_last_node_id);
-
-                // get the nodes of the way and there tags
-                for node_id in &visited_edges[i].nodes_ids {
-                    let node = self.nodes.get(node_id).unwrap();
-                    //println!("{:?}", node);
-                }
-
-                // get next edge first node id
-                let next_edge_first_node_id = visited_edges[i].nodes_ids.first().unwrap();
-                // get next edge last node id
-                let next_edge_last_node_id = visited_edges[i].nodes_ids.last().unwrap();
-                //println!("After roundabout first: {:?}", next_edge_first_node_id);
-                //println!("After roundabout last: {:?}", next_edge_last_node_id);
             } else {
                 if (is_prev_roundabout) {
-                    //println!("Roundabout exit: {}", roundabout_exit_counter);
                     let instruction = format!("Roundabout exit: {}", roundabout_exit_counter);
 
                     instructions.push((
@@ -229,17 +256,11 @@ impl OSMGraph {
                 }
 
                 if (way.tags.contains_key("name")) {
-                    //println!("Way name: {}", way.tags["name"]);
-
-                    // check if prev_edge and current edge are on the same way
                     if prev_edge.way_id != visited_edges[i].way_id {
-                        //instructions.push(json!({"instruction": "Turn", "distance": edge.distance_m}));
-                        // check if name of prev_edge and current edge are the same
                         let prev_way = self.ways.get(&prev_edge.way_id).unwrap();
                         if prev_way.tags.contains_key("name")
                             && prev_way.tags["name"] == way.tags["name"]
                         {
-                            //println!("Continue on road {}", way.tags["name"]);
                             let instruction = format!("Continue on road {}", way.tags["name"]);
                             instructions.push((
                                 instruction,
@@ -249,7 +270,6 @@ impl OSMGraph {
                             ));
                             distance_since_last_instruction = 0.0;
                         } else {
-                            // check the angle between last edge and current edge for determining the turn direction
                             let prev_edge_last_node = self.nodes.get(&prev_edge.to).unwrap();
                             let prev_edge_first_node = self.nodes.get(&prev_edge.from).unwrap();
                             let current_edge_first_node =
@@ -257,7 +277,6 @@ impl OSMGraph {
                             let current_edge_last_node =
                                 self.nodes.get(&visited_edges[i].to).unwrap();
 
-                            // calculate the angle between the last edge and the current edge
                             let prev_edge_angle = (prev_edge_last_node.lat()
                                 - prev_edge_first_node.lat())
                             .atan2(prev_edge_last_node.lon() - prev_edge_first_node.lon())
@@ -298,13 +317,6 @@ impl OSMGraph {
                             distance_since_last_instruction = 0.0;
                         }
                     }
-                } else {
-                    //println!("Way name: No name");
-                    if (way.tags.contains_key("noname")) {
-                        //println!("Way name: {}", way.tags["noname"]);
-                    } else {
-                        //println!("Way no name : {:?}", way.tags);
-                    }
                 }
             }
 
@@ -315,12 +327,15 @@ impl OSMGraph {
         let json_obj =
             json!({ "path": path, "instructions": instructions, "total_distance": total_distance });
 
-        // print instructions
-        //println!("Instructions: {:?}", instructions);
-
         json_obj
     }
 
+    /// Combine two paths
+    /// # Arguments
+    /// * `path_1` - The first path
+    /// * `path_2` - The second path
+    /// # Returns
+    /// * `Vec<NodeId>` - The combined path
     pub fn combine_paths(&self, path_1: Vec<NodeId>, path_2: Vec<NodeId>) -> Vec<NodeId> {
         let mut combined_path = path_1.clone();
 
@@ -332,6 +347,11 @@ impl OSMGraph {
         combined_path
     }
 
+    /// Get the edges that start from a node or contain it
+    /// # Arguments
+    /// * `node_id` - The id of the node
+    /// # Returns
+    /// * `Vec<&Edge>` - A vector of references to the edges that start from the node or contain it
     pub fn get_edges_from_node_or_containing(&self, node_id: NodeId) -> Vec<&Edge> {
         let mut edges = Vec::new();
 
@@ -342,24 +362,23 @@ impl OSMGraph {
         }
 
         if (edges.len() == 0) {
-            //println!("No edges found for node: {:?}", node_id);
-
             for edge in &self.edges {
                 for n_id in &edge.nodes_ids {
                     if node_id == *n_id {
                         edges.push(edge);
-                        //println!("Found edge containing node: {:?}", node_id);
                     }
                 }
             }
-
-            //println!("Found {} edges containing node: {:?}", edges.len(), node_id);
         }
-        //println!("Found {} edges from node: {:?}", edges.len(), node_id);
 
         edges
     }
 
+    /// Get the edges that start from a node
+    /// # Arguments
+    /// * `node_id` - The id of the node
+    /// # Returns
+    /// * `Vec<&Edge>` - A vector of references to the edges that start from the node
     pub fn get_edges_from_node(&self, node_id: NodeId) -> Vec<&Edge> {
         let mut edges = Vec::new();
 
@@ -369,24 +388,34 @@ impl OSMGraph {
             }
         }
 
-        //println!("Found {} edges from node: {:?}", edges.len(), node_id);
-
         edges
     }
 
+    /// Add an edge and the node where it starts to the graph
+    /// # Arguments
+    /// * `node_id` - The id of the node where the edge starts
+    /// * `edge` - The edge to add
     pub fn add_edge_from_node(&mut self, node_id: NodeId, edge: Edge) {
-        // add edge to edges_from_node hashmap
         let edges = self.edges_from_node.entry(node_id).or_insert(Vec::new());
         edges.push(edge);
     }
 
+    /// Get the edges that start from a node
+    /// # Arguments
+    /// * `node_id` - The id of the node
+    /// # Returns
+    /// * `&Vec<Edge>` - A reference to the vector of edges that start from the node
     pub fn get_edges_from_node_fast(&self, node_id: &NodeId) -> &Vec<Edge> {
-        // return edges from edges_from_node hashmap
         let edges = self.edges_from_node.get(node_id);
 
         edges.unwrap_or(&self.empty_edges)
     }
 
+    /// Get the edges that end to a node
+    /// # Arguments
+    /// * `node_id` - The id of the node
+    /// # Returns
+    /// * `Vec<&Edge>` - A vector of references to the edges that end to the node
     pub fn get_edges_to_node(&self, node_id: NodeId) -> Vec<&Edge> {
         let mut edges = Vec::new();
 
@@ -399,7 +428,13 @@ impl OSMGraph {
         edges
     }
 
-    // calculate the radius of the circle that contains the given three points
+    /// calculate the radius of the circle that contains the given three points
+    /// # Arguments
+    /// * `node_1` - The first node
+    /// * `node_2` - The second node
+    /// * `node_3` - The third node
+    /// # Returns
+    /// * `f64` - The radius of the circle
     pub fn circle_radius(node_1: &Node, node_2: &Node, node_3: &Node) -> f64 {
         let lat_1 = node_1.lat();
         let lon_1 = node_1.lon();
@@ -424,6 +459,15 @@ impl OSMGraph {
     }
 }
 
+/// Edge of the graph
+/// # Fields
+/// * `from` - The id of the node where the edge starts
+/// * `to` - The id of the node where the edge ends
+/// * `distance_m` - The distance of the edge in meters
+/// * `weight` - The weight of the edge
+/// * `time` - The time needed to traverse the edge
+/// * `nodes_ids` - The ids of the nodes that the edge contains
+/// * `way_id` - The id of the way that the edge belongs to
 #[derive(Debug, Clone)]
 pub struct Edge {
     pub from: NodeId,
@@ -435,7 +479,17 @@ pub struct Edge {
     pub way_id: WayId,
 }
 
+/// Edge implementation
 impl Edge {
+    /// Create a new edge
+    /// # Arguments
+    /// * `from` - The id of the node where the edge starts
+    /// * `to` - The id of the node where the edge ends
+    /// * `distance_m` - The distance of the edge in meters
+    /// * `weight` - The weight of the edge
+    /// * `time` - The time needed to traverse the edge
+    /// * `nodes_ids` - The ids of the nodes that the edge contains
+    /// * `way_id` - The id of the way that the edge belongs to
     pub fn new(
         from: NodeId,
         to: NodeId,
@@ -457,13 +511,22 @@ impl Edge {
     }
 }
 
+/// State of the graph
+/// # Fields
+/// * `node_id` - The id of the node
+/// * `distance` - The distance of the node from the source node
 #[derive(Debug, Clone)]
 pub struct State {
     pub node_id: NodeId,
     pub distance: f64,
 }
 
+/// State implementation
 impl State {
+    /// Create a new state
+    /// # Arguments
+    /// * `node_id` - The id of the node
+    /// * `distance` - The distance of the node from the source node
     pub fn new(node_id: NodeId, distance: f64) -> State {
         State { node_id, distance }
     }

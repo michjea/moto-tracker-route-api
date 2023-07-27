@@ -2,33 +2,25 @@
 mod osm_graph;
 mod osm_reader;
 mod route_calculation;
-
-use actix_web::cookie::time::macros::datetime;
-use osm_graph::Edge;
+use actix_cors::Cors;
+use actix_web::{get, post, web, web::ServiceConfig, App, HttpResponse, HttpServer, Responder};
+use chrono::Utc;
+use log::{info, warn};
 use osm_graph::OSMGraph;
 use osm_reader::OSMReader;
 use osmpbfreader::objects::{Node, NodeId, Tags, Way, WayId};
-//use route_calculation::bidirectional_dijkstra_path_2;
-use actix_cors::Cors;
 use route_calculation::dijkstra;
 use route_calculation::generate_random_loop;
-use std::env;
-use std::path::PathBuf;
-
-use actix_web::{get, post, web, web::ServiceConfig, App, HttpResponse, HttpServer, Responder};
+use serde_json::{json, Map, Value};
 use shuttle_actix_web::ShuttleActixWeb;
-
-use chrono::Utc;
+use std::env;
 use std::fs::File;
 use std::io::copy;
 use std::io::Write;
-
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-
-use log::{info, warn};
-
-use serde_json::{json, Map, Value};
 
 async fn start() {
     let current_dir = env::current_dir().expect("Failed to get current directory");
@@ -36,18 +28,12 @@ async fn start() {
 
     let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
     let mut graph = osm_reader.build_graph().await;
-    //let mut graph = OSMGraph::new();
 
-    // calculate dijkstra
     let start_time = std::time::Instant::now();
 
-    // coordinates of Neuchâtel
     let coords_neuchatel = (46.992979, 6.931933);
-
     let coords_poms_moi = (47.2715023, 6.9877472);
     let coords_poms_2 = (47.26944444, 6.98444444);
-
-    // coordinates of Saignelégier
     let coords_saignelegier = (47.25, 7.0);
 
     let timer = std::time::Instant::now();
@@ -125,17 +111,15 @@ async fn start() {
     );*/
 
     println!("Time to calculate dijkstra: {:?}", timer.elapsed());
-
-    //println!("Result: {:?}", result);
 }
 
-// get route from A to B
-#[get("/route/{from}/{to}")]
-async fn route(path: web::Path<(String, String)>, data: web::Data<AppState>) -> impl Responder {
-    let (from, to) = path.into_inner();
-    HttpResponse::Ok().body(format!("From {} to {}", from, to))
-}
-
+/// Parameters for the calculate-route endpoint
+/// # Fields
+/// * from_lat: latitude of the starting point
+/// * from_lon: longitude of the starting point
+/// * to_lat: latitude of the ending point
+/// * to_lon: longitude of the ending point
+/// Example: http://localhost:8080/calculate-route/?from_lat=47.2715023&from_lon=6.9877472&to_lat=47.25&to_lon=7.0
 #[derive(serde::Deserialize, Debug)]
 struct CalculateRouteParams {
     from_lat: f64,
@@ -144,6 +128,12 @@ struct CalculateRouteParams {
     to_lon: f64,
 }
 
+/// Parameters for the calculate-loop endpoint
+/// # Fields
+/// * from_lat: latitude of the starting point
+/// * from_lon: longitude of the starting point
+/// * distance: distance of the loop in meters
+/// Example: http://localhost:8080/calculate-loop/?from_lat=47.2715023&from_lon=6.9877472&distance=1000
 #[derive(serde::Deserialize, Debug)]
 struct CalculateLoopParams {
     from_lat: f64,
@@ -151,42 +141,42 @@ struct CalculateLoopParams {
     distance: f64, // distance in meters
 }
 
-#[derive(serde::Deserialize, Debug)]
-struct TestParams {
-    num: f64,
-    text: String,
-}
-
-/* !!! Remove last slash for deploy (issue Shuttle) !!! */
+/// Calculate a route between two points
+/// # Parameters
+/// * from_lat: latitude of the starting point
+/// * from_lon: longitude of the starting point
+/// * to_lat: latitude of the ending point
+/// * to_lon: longitude of the ending point
+/// # Returns
+/// * A JSON object containing the route
+/// # Example
+/// http://localhost:8080/calculate-route/?from_lat=47.2715023&from_lon=6.9877472&to_lat=47.25&to_lon=7.0
 #[get("/calculate-route/")]
 async fn calculate_route(
     params: web::Query<CalculateRouteParams>,
     data: web::Data<AppState>,
 ) -> impl Responder {
-    // print request
-    info!("Request: {:?}", params);
-
     let start_node = {
-        let graph = &data.graph; // Create a new scope to borrow graph immutably
+        let graph = &data.graph;
         graph
             .get_nearest_node(params.from_lat, params.from_lon)
             .unwrap()
     };
 
     let end_node = {
-        let graph = &data.graph; // Create a new scope to borrow graph immutably
+        let graph = &data.graph;
         graph
             .get_nearest_node(params.to_lat, params.to_lon)
             .unwrap()
     };
 
     let (result, edges) = dijkstra(&data.graph, &start_node, &end_node);
-    // if result is None, return error
+
     if result.is_none() {
         return HttpResponse::BadRequest().body("No route found");
     } else {
         let result = result.unwrap();
-        // reconstruct path
+
         let test = data
             .graph
             .directions_instructions_and_path(&result, &edges.unwrap());
@@ -195,17 +185,19 @@ async fn calculate_route(
 
         path.push(test);
 
-        //let path = data.graph.reconstruct_path(&result);
-
-        // return test
         HttpResponse::Ok().json(path)
-
-        //HttpResponse::Ok().json(path)
     }
-
-    //HttpResponse::Ok().json(path)
 }
 
+/// Calculate a loop starting from a point
+/// # Parameters
+/// * from_lat: latitude of the starting point
+/// * from_lon: longitude of the starting point
+/// * distance: distance of the loop in meters
+/// # Returns
+/// * A JSON object containing the route
+/// # Example
+/// http://localhost:8080/calculate-loop/?from_lat=47.2715023&from_lon=6.9877472&distance=1000
 #[get("/calculate-loop/")]
 async fn calculate_loop(
     params: web::Query<CalculateLoopParams>,
@@ -234,12 +226,13 @@ async fn calculate_loop(
         path.push(res);
     }
 
-    // reconstruct path
-    //let mut path = data.graph.reconstruct_path(&result);
-
     HttpResponse::Ok().json(path)
 }
 
+/// Main function
+/// # Returns
+/// * A ShuttleActixWeb object
+/// # Example
 #[shuttle_runtime::main]
 async fn actix_web(
     #[shuttle_static_folder::StaticFolder(folder = "static")] static_folder: PathBuf,
@@ -256,9 +249,8 @@ async fn actix_web(
 
     let name: String = format!("swiss-{}.pbf", timestamp);
 
-    //let static_folder = "static/";
     let file_path = static_folder.join(&name);
-    //let file_path = format!("{}{}", static_folder.to_str(), name);
+
     info!("Saving file...");
     println!("Saving file...");
 
@@ -280,7 +272,6 @@ async fn actix_web(
     info!("File saved !");
     println!("File saved !");
 
-    //let file_path = static_folder.join(name);*/
     let mut osm_reader = OSMReader::new(file_path.to_str().unwrap().to_string());
     let graph = osm_reader.build_graph().await;
 
@@ -297,22 +288,31 @@ async fn actix_web(
     info!("Starting server...");
     println!("Starting server...");
 
-    // start server
     let config = move |cfg: &mut ServiceConfig| {
         let cors = Cors::default()
             .allow_any_origin()
             .allow_any_method()
             .allow_any_header();
 
-        cfg.app_data(app_data.clone())
-            .service(route)
-            .service(calculate_loop)
-            .service(calculate_route);
+        cfg.service(
+            web::scope("")
+                .service(calculate_loop)
+                .service(calculate_route)
+                .app_data(app_data.clone())
+                .wrap(Arc::new(cors)),
+        );
+
+        /*cfg.app_data(app_data.clone())
+        .service(route)
+        .service(calculate_loop)
+        .service(calculate_route)
+        .wrap(Arc::new(cors));*/
     };
 
     Ok(config.into())
 }
 
+/// Main function
 //#[actix_web::main]
 async fn main_actix() -> std::io::Result<()> {
     // change to main to start server
@@ -335,7 +335,6 @@ async fn main_actix() -> std::io::Result<()> {
 
     println!("Starting server...");
 
-    // start server
     HttpServer::new(move || {
         let cors = Cors::default()
             .allow_any_origin()
@@ -345,15 +344,17 @@ async fn main_actix() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .app_data(app_data.clone())
-            .service(route)
             .service(calculate_route)
     })
-    //.bind("|| App::new().data(app_state.clone()).service(route))
     .bind(("127.0.0.1", 4242))?
     .run()
     .await
 }
 
+/// Application state
+/// # Fields
+/// * app_name: name of the application
+/// * graph: OSMGraph
 #[derive(Clone)]
 struct AppState {
     app_name: String,
